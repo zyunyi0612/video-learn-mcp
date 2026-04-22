@@ -88,18 +88,19 @@ chmod +x install.sh
 使用 `/video-learn` 命令后，Skill 会**分步调用**以下 MCP 工具，每步完成后实时展示进度：
 
 ```
-Step 0:   依赖检查          → 自动检测并安装缺失的依赖
-Step 1/4: 下载视频          → 报告视频标题、时长
-Step 2/4: 截取关键帧        → 报告截帧数量
-Step 3/4: 语音转文字        → 报告转录段数、语言、文字预览
-Step 4/4: 图文配对          → 报告配对组数
-分析 + 生成学习笔记         → 输出 notes.md
+Step 0:   依赖检查（video-check-deps）→ 自动检测并安装缺失的依赖
+Step 1/4: 下载视频（video-download）  → 报告视频标题、时长
+Step 2/4: 截取关键帧（video-extract-frames）→ 报告截帧数量
+Step 3/4: 语音转文字（video-transcribe）→ 报告转录段数、语言、文字预览
+Step 4/4: 图文配对（video-assemble）  → 报告配对组数
+分析 + 生成学习笔记                   → 输出 notes.md
 ```
 
 ## MCP 工具
 
 | 工具名 | 功能 |
 |--------|------|
+| `video-check-deps` | 检查系统依赖是否已安装（ffmpeg、yt-dlp、Python 3.10+、faster-whisper 等） |
 | `video-download` | 下载或获取视频文件 |
 | `video-extract-frames` | 从视频中提取关键帧图片 |
 | `video-transcribe` | 将视频语音转录为带时间戳的文字 |
