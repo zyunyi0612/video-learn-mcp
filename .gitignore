@@ -1,0 +1,4 @@
+node_modules/
+dist/
+cookies.txt
+*.cookies

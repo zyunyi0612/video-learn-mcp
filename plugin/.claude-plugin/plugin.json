@@ -1,0 +1,17 @@
+{
+  "name": "video-learn",
+  "version": "1.0.0",
+  "description": "Learn from videos - download, extract frames, transcribe speech, pair text with images, generate study notes",
+  "author": {
+    "name": "zhangyunyi"
+  },
+  "repository": "https://github.com/zhangyunyi/video-learn-mcp",
+  "license": "MIT",
+  "keywords": [
+    "video",
+    "learning",
+    "whisper",
+    "transcription",
+    "mcp"
+  ]
+}

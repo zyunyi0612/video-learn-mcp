@@ -1,0 +1,26 @@
+{
+  "whisper": {
+    "model": "large-v3",
+    "language": "zh",
+    "device": "auto",
+    "compute_type": "int8"
+  },
+  "extractor": {
+    "mode": "interval",
+    "interval_seconds": 5,
+    "scene_threshold": 0.3,
+    "image_format": "png",
+    "image_quality": 90
+  },
+  "output": {
+    "base_dir": "~/Downloads/video-learn",
+    "keep_video": true,
+    "keep_audio": false
+  },
+  "downloader": {
+    "proxy": "",
+    "cookies_file": "",
+    "max_resolution": "1080p",
+    "prefer_format": "mp4"
+  }
+}

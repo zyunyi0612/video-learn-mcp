@@ -1,0 +1,7 @@
+{
+  "name": "video-learn-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Runtime dependencies for video-learn MCP Server",
+  "type": "module"
+}

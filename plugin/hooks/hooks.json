@@ -1,0 +1,17 @@
+{
+  "description": "Video-learn plugin hooks",
+  "hooks": {
+    "Setup": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "export PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\"; node \"${CLAUDE_PLUGIN_ROOT}/scripts/check-deps.mjs\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

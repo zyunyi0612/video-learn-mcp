@@ -1,0 +1,18 @@
+{
+  "name": "video-learn-mcp",
+  "owner": {
+    "name": "zhangyunyi"
+  },
+  "metadata": {
+    "description": "Video learning tool - download, transcribe, extract frames, and generate study notes",
+    "homepage": "https://github.com/zhangyunyi/video-learn-mcp"
+  },
+  "plugins": [
+    {
+      "name": "video-learn",
+      "version": "1.0.0",
+      "source": "./plugin",
+      "description": "Learn from videos - download, extract frames, transcribe speech, pair text with images, generate study notes"
+    }
+  ]
+}
