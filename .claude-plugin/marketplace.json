@@ -10,7 +10,7 @@
   "plugins": [
     {
       "name": "video-learn",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "source": "./plugin",
       "description": "Learn from videos - download, extract frames, transcribe speech, pair text with images, generate study notes"
     }
