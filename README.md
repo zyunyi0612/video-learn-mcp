@@ -12,13 +12,17 @@ Claude Code 插件 — 从视频中学习。自动下载视频、截取关键帧
 
 ## 安装
 
-### 一键安装（推荐）
+### 插件安装（推荐）
 
 ```bash
-claude plugin add zyunyi0612/video-learn-mcp
+# 1. 添加插件仓库
+claude plugin marketplace add zyunyi0612/video-learn-mcp
+
+# 2. 安装插件
+claude plugin install video-learn
 ```
 
-安装后 Claude Code 会自动加载 MCP Server 和 `/video-learn` Skill，无需手动配置。
+安装后重启 Claude Code，MCP Server 和 `/video-learn` Skill 会自动加载，无需手动配置。
 
 ### 安装外部依赖
 
