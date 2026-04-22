@@ -7,6 +7,10 @@ import { extractFrames } from "./extractor.js";
 import { transcribeVideo } from "./transcriber.js";
 import { assembleResults } from "./assembler.js";
 import { mkdir } from "fs/promises";
+import { execFile } from "child_process";
+import { promisify } from "util";
+
+const execFileAsync = promisify(execFile);
 
 const server = new McpServer({
   name: "video-learn",
@@ -15,6 +19,126 @@ const server = new McpServer({
 
 let resetIdle: () => void = () => {};
 let pauseIdle: () => void = () => {};
+
+async function checkCommand(cmd: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(cmd, ["--version"], { timeout: 5000 });
+    return stdout.trim().split("\n")[0];
+  } catch {
+    return null;
+  }
+}
+
+async function checkPythonModule(pythonCmd: string, module: string, importStatement: string): Promise<boolean> {
+  try {
+    await execFileAsync(pythonCmd, ["-c", importStatement], { timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function findBestPython(): Promise<{ cmd: string; version: string } | null> {
+  const candidates = [
+    "/opt/homebrew/bin/python3.11",
+    "/opt/homebrew/bin/python3",
+    "/usr/local/bin/python3.11",
+    "/usr/local/bin/python3",
+    "python3.11",
+    "python3",
+  ];
+  for (const cmd of candidates) {
+    try {
+      const { stdout } = await execFileAsync(cmd, ["-c", "import sys; print(sys.version_info.minor)"]);
+      const minor = parseInt(stdout.trim(), 10);
+      if (minor >= 10) {
+        const { stdout: ver } = await execFileAsync(cmd, ["-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"]);
+        return { cmd, version: ver.trim() };
+      }
+    } catch {}
+  }
+  return null;
+}
+
+// 工具0：依赖检查
+server.tool(
+  "video-check-deps",
+  "检查 video-learn 所需的系统依赖是否已安装（ffmpeg、yt-dlp、Python 3.10+、faster-whisper 等）",
+  {},
+  async () => {
+    const deps: { name: string; status: "ok" | "missing" | "warn"; version?: string; detail?: string }[] = [];
+    const missing: string[] = [];
+
+    // ffmpeg
+    const ffmpegVer = await checkCommand("ffmpeg");
+    if (ffmpegVer) {
+      const match = ffmpegVer.match(/version\s+([\S]+)/);
+      deps.push({ name: "ffmpeg", status: "ok", version: match?.[1] || "unknown" });
+    } else {
+      deps.push({ name: "ffmpeg", status: "missing", detail: "brew install ffmpeg" });
+      missing.push("ffmpeg");
+    }
+
+    // yt-dlp
+    const ytdlpVer = await checkCommand("yt-dlp");
+    if (ytdlpVer) {
+      deps.push({ name: "yt-dlp", status: "ok", version: ytdlpVer });
+    } else {
+      deps.push({ name: "yt-dlp", status: "missing", detail: "pip3 install yt-dlp[default]" });
+      missing.push("yt-dlp");
+    }
+
+    // Python 3.10+
+    const python = await findBestPython();
+    if (python) {
+      deps.push({ name: "python3", status: "ok", version: python.version, detail: python.cmd });
+
+      // faster-whisper
+      const hasWhisper = await checkPythonModule(python.cmd, "faster-whisper", "from faster_whisper import WhisperModel");
+      if (hasWhisper) {
+        deps.push({ name: "faster-whisper", status: "ok" });
+      } else {
+        deps.push({ name: "faster-whisper", status: "missing", detail: "pip3 install faster-whisper" });
+        missing.push("faster-whisper");
+      }
+
+      // cryptography
+      const hasCrypto = await checkPythonModule(python.cmd, "cryptography", "from cryptography.hazmat.primitives.ciphers import Cipher");
+      if (hasCrypto) {
+        deps.push({ name: "cryptography", status: "ok" });
+      } else {
+        deps.push({ name: "cryptography", status: "warn", detail: "pip3 install cryptography（YouTube cookies 自动导出需要）" });
+      }
+
+      // certifi
+      const hasCertifi = await checkPythonModule(python.cmd, "certifi", "import certifi");
+      if (hasCertifi) {
+        deps.push({ name: "certifi", status: "ok" });
+      } else {
+        deps.push({ name: "certifi", status: "warn", detail: "pip3 install certifi（macOS SSL 证书需要）" });
+      }
+    } else {
+      deps.push({ name: "python3", status: "missing", detail: "需要 Python 3.10+，brew install python@3.11" });
+      missing.push("python3.10+");
+      deps.push({ name: "faster-whisper", status: "missing", detail: "需要先安装 Python 3.10+" });
+      missing.push("faster-whisper");
+    }
+
+    const allOk = missing.length === 0;
+
+    return {
+      content: [{
+        type: "text" as const,
+        text: JSON.stringify({
+          allOk,
+          missing,
+          deps,
+          installHint: allOk ? null : `缺少 ${missing.length} 个关键依赖：${missing.join("、")}`,
+        }, null, 2),
+      }],
+    };
+  }
+);
 
 // 工具1：视频下载
 server.tool(

@@ -21462,6 +21462,9 @@ function formatTime(seconds) {
 
 // src/index.ts
 import { mkdir as mkdir4 } from "fs/promises";
+import { execFile as execFile4 } from "child_process";
+import { promisify as promisify4 } from "util";
+var execFileAsync4 = promisify4(execFile4);
 var server = new McpServer({
   name: "video-learn",
   version: "1.0.0"
@@ -21470,6 +21473,108 @@ var resetIdle = () => {
 };
 var pauseIdle = () => {
 };
+async function checkCommand(cmd) {
+  try {
+    const { stdout } = await execFileAsync4(cmd, ["--version"], { timeout: 5e3 });
+    return stdout.trim().split("\n")[0];
+  } catch {
+    return null;
+  }
+}
+async function checkPythonModule(pythonCmd, module, importStatement) {
+  try {
+    await execFileAsync4(pythonCmd, ["-c", importStatement], { timeout: 5e3 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function findBestPython() {
+  const candidates = [
+    "/opt/homebrew/bin/python3.11",
+    "/opt/homebrew/bin/python3",
+    "/usr/local/bin/python3.11",
+    "/usr/local/bin/python3",
+    "python3.11",
+    "python3"
+  ];
+  for (const cmd of candidates) {
+    try {
+      const { stdout } = await execFileAsync4(cmd, ["-c", "import sys; print(sys.version_info.minor)"]);
+      const minor = parseInt(stdout.trim(), 10);
+      if (minor >= 10) {
+        const { stdout: ver } = await execFileAsync4(cmd, ["-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"]);
+        return { cmd, version: ver.trim() };
+      }
+    } catch {
+    }
+  }
+  return null;
+}
+server.tool(
+  "video-check-deps",
+  "\u68C0\u67E5 video-learn \u6240\u9700\u7684\u7CFB\u7EDF\u4F9D\u8D56\u662F\u5426\u5DF2\u5B89\u88C5\uFF08ffmpeg\u3001yt-dlp\u3001Python 3.10+\u3001faster-whisper \u7B49\uFF09",
+  {},
+  async () => {
+    const deps = [];
+    const missing = [];
+    const ffmpegVer = await checkCommand("ffmpeg");
+    if (ffmpegVer) {
+      const match = ffmpegVer.match(/version\s+([\S]+)/);
+      deps.push({ name: "ffmpeg", status: "ok", version: match?.[1] || "unknown" });
+    } else {
+      deps.push({ name: "ffmpeg", status: "missing", detail: "brew install ffmpeg" });
+      missing.push("ffmpeg");
+    }
+    const ytdlpVer = await checkCommand("yt-dlp");
+    if (ytdlpVer) {
+      deps.push({ name: "yt-dlp", status: "ok", version: ytdlpVer });
+    } else {
+      deps.push({ name: "yt-dlp", status: "missing", detail: "pip3 install yt-dlp[default]" });
+      missing.push("yt-dlp");
+    }
+    const python = await findBestPython();
+    if (python) {
+      deps.push({ name: "python3", status: "ok", version: python.version, detail: python.cmd });
+      const hasWhisper = await checkPythonModule(python.cmd, "faster-whisper", "from faster_whisper import WhisperModel");
+      if (hasWhisper) {
+        deps.push({ name: "faster-whisper", status: "ok" });
+      } else {
+        deps.push({ name: "faster-whisper", status: "missing", detail: "pip3 install faster-whisper" });
+        missing.push("faster-whisper");
+      }
+      const hasCrypto = await checkPythonModule(python.cmd, "cryptography", "from cryptography.hazmat.primitives.ciphers import Cipher");
+      if (hasCrypto) {
+        deps.push({ name: "cryptography", status: "ok" });
+      } else {
+        deps.push({ name: "cryptography", status: "warn", detail: "pip3 install cryptography\uFF08YouTube cookies \u81EA\u52A8\u5BFC\u51FA\u9700\u8981\uFF09" });
+      }
+      const hasCertifi = await checkPythonModule(python.cmd, "certifi", "import certifi");
+      if (hasCertifi) {
+        deps.push({ name: "certifi", status: "ok" });
+      } else {
+        deps.push({ name: "certifi", status: "warn", detail: "pip3 install certifi\uFF08macOS SSL \u8BC1\u4E66\u9700\u8981\uFF09" });
+      }
+    } else {
+      deps.push({ name: "python3", status: "missing", detail: "\u9700\u8981 Python 3.10+\uFF0Cbrew install python@3.11" });
+      missing.push("python3.10+");
+      deps.push({ name: "faster-whisper", status: "missing", detail: "\u9700\u8981\u5148\u5B89\u88C5 Python 3.10+" });
+      missing.push("faster-whisper");
+    }
+    const allOk = missing.length === 0;
+    return {
+      content: [{
+        type: "text",
+        text: JSON.stringify({
+          allOk,
+          missing,
+          deps,
+          installHint: allOk ? null : `\u7F3A\u5C11 ${missing.length} \u4E2A\u5173\u952E\u4F9D\u8D56\uFF1A${missing.join("\u3001")}`
+        }, null, 2)
+      }]
+    };
+  }
+);
 server.tool(
   "video-download",
   "\u4E0B\u8F7D\u6216\u83B7\u53D6\u89C6\u9891\u6587\u4EF6\u3002\u652F\u6301\u672C\u5730\u8DEF\u5F84\u3001YouTube URL\u3001B\u7AD9 URL",

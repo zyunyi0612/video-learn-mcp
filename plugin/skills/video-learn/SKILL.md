@@ -33,96 +33,14 @@ user_invocable: true
 从用户输入中提取视频路径/URL 和可选参数（--model, --interval, --smart, --lang, --proxy）。
 
 ### Step 1.5: 检查依赖
-在开始处理之前，使用 Bash 工具检查所有必需的系统依赖是否已安装。运行以下检查脚本：
+调用 `video-check-deps` MCP 工具（无需参数）。
 
-```bash
-echo "=== 检查依赖 ===" && \
-MISSING="" && \
-# 检查 ffmpeg
-if command -v ffmpeg &>/dev/null; then echo "ffmpeg: OK ($(ffmpeg -version 2>&1 | head -1 | awk '{print $3}'))"; else MISSING="$MISSING ffmpeg"; echo "ffmpeg: 未安装"; fi && \
-# 检查 yt-dlp
-if command -v yt-dlp &>/dev/null; then echo "yt-dlp: OK ($(yt-dlp --version 2>&1))"; else MISSING="$MISSING yt-dlp"; echo "yt-dlp: 未安装"; fi && \
-# 检查 Python 版本（需要 3.10+）
-PY_OK=0 && \
-if command -v python3 &>/dev/null; then
-  PY_VER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null)
-  PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)" 2>/dev/null)
-  if [ "$PY_MINOR" -ge 10 ] 2>/dev/null; then echo "python3: OK ($PY_VER)"; PY_OK=1; else MISSING="$MISSING python3.10+"; echo "python3: 版本过低 ($PY_VER)，需要 3.10+"; fi
-else MISSING="$MISSING python3"; echo "python3: 未安装"; fi && \
-# 检查 faster-whisper
-if python3 -c "from faster_whisper import WhisperModel" &>/dev/null 2>&1; then echo "faster-whisper: OK"; else MISSING="$MISSING faster-whisper"; echo "faster-whisper: 未安装"; fi && \
-# 检查 cryptography（YouTube cookies 需要）
-if python3 -c "from cryptography.hazmat.primitives.ciphers import Cipher" &>/dev/null 2>&1; then echo "cryptography: OK"; else echo "cryptography: 未安装（YouTube cookies 自动导出将不可用）"; fi && \
-# 检查 certifi（SSL 证书）
-if python3 -c "import certifi" &>/dev/null 2>&1; then echo "certifi: OK"; else echo "certifi: 未安装（可能遇到 SSL 错误）"; fi && \
-echo "=== MISSING:$MISSING ==="
-```
-
-根据检查结果处理：
-
-**如果有缺失的依赖**，告诉用户缺少哪些依赖，然后用 Bash 自动安装。按以下顺序安装：
-
-1. **ffmpeg**（如果缺失）：
-   - macOS: `brew install ffmpeg`
-   - Linux: `sudo apt-get update && sudo apt-get install -y ffmpeg`
-
-2. **Python 3.10+**（如果缺失或版本过低）：
-   - macOS: `brew install python@3.11`
-   - Linux: `sudo apt-get install -y python3.11 python3.11-venv python3.11-pip`
-
-3. **yt-dlp**（如果缺失）：
-   - 先判断 Python 版本决定是否需要 `--break-system-packages`：
-   ```bash
-   PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
-   if [ "$PY_MINOR" -ge 12 ]; then
-     pip3 install --break-system-packages --upgrade "yt-dlp[default]"
-   else
-     pip3 install --upgrade "yt-dlp[default]"
-   fi
-   ```
-   - 安装后如果 `command -v yt-dlp` 找不到，需要创建软链接：
-   ```bash
-   YT_DLP_BIN=$(python3 -c "import site; print(site.getusersitepackages().replace('/lib/python/site-packages', '/bin'))" 2>/dev/null)/yt-dlp
-   if [ -f "$YT_DLP_BIN" ] && ! command -v yt-dlp &>/dev/null; then
-     mkdir -p "$HOME/.local/bin"
-     ln -sf "$YT_DLP_BIN" "$HOME/.local/bin/yt-dlp"
-     export PATH="$HOME/.local/bin:$PATH"
-   fi
-   ```
-
-4. **faster-whisper**（如果缺失）：
-   ```bash
-   PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
-   if [ "$PY_MINOR" -ge 12 ]; then
-     pip3 install --break-system-packages faster-whisper
-   else
-     pip3 install faster-whisper
-   fi
-   ```
-
-5. **cryptography**（如果缺失，用于 YouTube cookies 自动导出）：
-   ```bash
-   PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
-   if [ "$PY_MINOR" -ge 12 ]; then
-     pip3 install --break-system-packages cryptography
-   else
-     pip3 install cryptography
-   fi
-   ```
-
-6. **certifi**（如果缺失，解决 macOS SSL 证书问题）：
-   ```bash
-   PY_MINOR=$(python3 -c "import sys; print(sys.version_info.minor)")
-   if [ "$PY_MINOR" -ge 12 ]; then
-     pip3 install --break-system-packages certifi
-   else
-     pip3 install certifi
-   fi
-   ```
-
-安装完成后，再次运行检查脚本验证所有依赖都已就位。如果仍有关键依赖（ffmpeg、yt-dlp、python3、faster-whisper）缺失，告诉用户具体哪个安装失败，并停止后续步骤。
-
-**如果所有依赖都已安装**，告诉用户："依赖检查通过，开始处理视频..."
+根据返回结果：
+- 如果 `allOk` 为 true，告诉用户："依赖检查通过，开始处理视频..."
+- 如果 `allOk` 为 false，告诉用户缺少哪些依赖（`missing` 字段），以及每个的安装方式（`deps` 中的 `detail` 字段）。然后用 Bash 自动安装缺失的依赖。安装时注意：
+  - Python 3.12+ 的 pip 安装需要加 `--break-system-packages` 参数
+  - yt-dlp 安装后如果 `command -v yt-dlp` 找不到，需要创建软链接到 `~/.local/bin/`
+  - 安装完成后再次调用 `video-check-deps` 验证。如果仍有关键依赖缺失，告诉用户并停止
 
 ### Step 2: 下载视频
 先告诉用户：**"Step 1/4: 开始下载视频..."**
