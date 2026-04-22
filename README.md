@@ -24,24 +24,30 @@ claude plugin install video-learn
 
 安装后重启 Claude Code，MCP Server 和 `/video-learn` Skill 会自动加载，无需手动配置。
 
-### 安装外部依赖
+### 外部依赖（自动检测）
 
-插件依赖以下系统工具，首次使用前需安装：
+首次运行 `/video-learn` 时，Skill 会自动检测以下依赖是否已安装，缺少的会自动安装：
+
+| 依赖 | 用途 | 自动安装方式 |
+|------|------|-------------|
+| ffmpeg | 视频截帧、音频提取 | `brew install ffmpeg` / `apt-get install ffmpeg` |
+| yt-dlp | 下载 YouTube/B站视频 | `pip3 install yt-dlp[default]` |
+| faster-whisper | 语音转文字 | `pip3 install faster-whisper` |
+| cryptography | YouTube cookies 自动导出 | `pip3 install cryptography` |
+| certifi | 解决 macOS SSL 证书问题 | `pip3 install certifi` |
+
+> Python 3.10+ 是必需的（faster-whisper 要求）。Python 3.12+ 的 pip 安装会自动加 `--break-system-packages` 参数。
+
+如果你想提前手动安装，也可以运行：
 
 ```bash
 # macOS
 brew install ffmpeg
-pip3 install yt-dlp faster-whisper
+pip3 install yt-dlp faster-whisper cryptography certifi
 
 # Linux
 sudo apt-get install ffmpeg
-pip3 install yt-dlp faster-whisper
-```
-
-或者使用一键脚本：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/zyunyi0612/video-learn-mcp/main/install-deps.sh | bash
+pip3 install yt-dlp faster-whisper cryptography certifi
 ```
 
 ### 手动安装（不使用插件系统）
@@ -82,11 +88,12 @@ chmod +x install.sh
 使用 `/video-learn` 命令后，Skill 会**分步调用**以下 MCP 工具，每步完成后实时展示进度：
 
 ```
-Step 1/4: 下载视频        → 报告视频标题、时长
-Step 2/4: 截取关键帧      → 报告截帧数量
-Step 3/4: 语音转文字      → 报告转录段数、语言、文字预览
-Step 4/4: 图文配对        → 报告配对组数
-分析 + 生成学习笔记       → 输出 notes.md
+Step 0:   依赖检查          → 自动检测并安装缺失的依赖
+Step 1/4: 下载视频          → 报告视频标题、时长
+Step 2/4: 截取关键帧        → 报告截帧数量
+Step 3/4: 语音转文字        → 报告转录段数、语言、文字预览
+Step 4/4: 图文配对          → 报告配对组数
+分析 + 生成学习笔记         → 输出 notes.md
 ```
 
 ## MCP 工具
@@ -157,6 +164,12 @@ Step 4/4: 图文配对        → 报告配对组数
 - 约 1-3GB 磁盘空间（Whisper 模型缓存）
 
 ## 常见问题
+
+**Q: pip3 install 报错 "externally-managed-environment"？**
+A: Python 3.12+ 需要加 `--break-system-packages` 参数。Skill 的自动安装已处理此问题，手动安装时请加上此参数。
+
+**Q: yt-dlp 安装后找不到命令？**
+A: pip 安装的可执行文件可能不在 PATH 中。Skill 会自动创建软链接到 `~/.local/bin/`。手动解决：`export PATH="$HOME/.local/bin:$PATH"`
 
 **Q: YouTube 下载失败？**
 A: 需要 Chrome 浏览器登录 Google 账号，插件会自动读取 cookies。
