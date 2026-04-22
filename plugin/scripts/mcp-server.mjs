@@ -566,79 +566,49 @@ server.tool(
   }
 );
 server.tool(
-  "video-learn",
-  "\u4E00\u952E\u5B8C\u6574\u6D41\u7A0B\uFF1A\u4E0B\u8F7D\u89C6\u9891 \u2192 \u622A\u5E27 \u2192 \u8BED\u97F3\u8F6C\u6587\u5B57 \u2192 \u56FE\u6587\u914D\u5BF9\u3002\u652F\u6301\u672C\u5730\u6587\u4EF6\u3001YouTube\u3001B\u7AD9",
+  "video-assemble",
+  "\u5C06\u622A\u5E27\u56FE\u7247\u4E0E\u8F6C\u5F55\u6587\u5B57\u6309\u65F6\u95F4\u6233\u914D\u5BF9\uFF0C\u751F\u6210 paired_results.json",
   {
-    input: z.string().describe("\u89C6\u9891\u8DEF\u5F84\u6216 URL"),
-    output_dir: z.string().optional().describe("\u8F93\u51FA\u76EE\u5F55\uFF08\u53EF\u9009\uFF09"),
-    model: z.string().optional().describe("Whisper \u6A21\u578B\uFF1Atiny/base/small/medium/large-v3"),
-    language: z.string().optional().describe("\u8BED\u8A00\uFF1Azh/en/auto"),
-    mode: z.enum(["interval", "smart"]).optional().describe("\u622A\u5E27\u6A21\u5F0F"),
-    interval_seconds: z.number().optional().describe("\u622A\u5E27\u95F4\u9694\u79D2\u6570"),
-    proxy: z.string().optional().describe("\u4EE3\u7406\u5730\u5740")
+    frames_dir: z.string().describe("\u622A\u5E27\u56FE\u7247\u76EE\u5F55\u8DEF\u5F84"),
+    transcript_file: z.string().describe("\u8F6C\u5F55\u7ED3\u679C JSON \u6587\u4EF6\u8DEF\u5F84"),
+    output_dir: z.string().describe("\u8F93\u51FA\u76EE\u5F55"),
+    interval_seconds: z.number().optional().describe("\u622A\u5E27\u95F4\u9694\u79D2\u6570\uFF08\u7528\u4E8E\u65F6\u95F4\u7A97\u53E3\u5339\u914D\uFF09")
   },
-  async ({ input, output_dir, model, language, mode, interval_seconds, proxy }) => {
+  async ({ frames_dir, transcript_file, output_dir, interval_seconds }) => {
     pauseIdle();
     try {
       const config = loadConfig();
-      if (model) config.whisper.model = model;
-      if (language) config.whisper.language = language;
-      if (mode) config.extractor.mode = mode;
-      if (interval_seconds) config.extractor.interval_seconds = interval_seconds;
-      if (proxy) config.downloader.proxy = proxy;
-      const outDir = output_dir || getOutputDir(config, input);
-      await mkdir4(outDir, { recursive: true });
-      const downloadResult = await downloadVideo(input, outDir, config.downloader);
-      const extractResult = await extractFrames(
-        downloadResult.videoPath,
-        outDir,
-        config.extractor
-      );
-      const transcribeResult = await transcribeVideo(
-        downloadResult.videoPath,
-        outDir,
-        config.whisper
-      );
-      const assembleResult = await assembleResults(
-        extractResult.frameFiles,
-        extractResult.timestamps,
-        transcribeResult.segments,
-        config.extractor.interval_seconds,
-        outDir
-      );
-      const summary = {
-        success: true,
-        title: downloadResult.title,
-        sourceType: downloadResult.sourceType,
-        outputDir: outDir,
-        stats: {
-          frames: extractResult.frameCount,
-          segments: transcribeResult.segments.length,
-          pairedItems: assembleResult.items.length
-        },
-        files: {
-          video: downloadResult.videoPath,
-          framesDir: extractResult.framesDir,
-          transcript: transcribeResult.outputFile,
-          pairedResults: assembleResult.outputFile
-        },
-        preview: assembleResult.items.slice(0, 3).map((item) => ({
-          time: item.timeLabel,
-          frame: item.framePath,
-          text: item.text.slice(0, 100)
-        }))
-      };
+      const interval = interval_seconds || config.extractor.interval_seconds;
+      const { readFile: readFile2, readdir: readdir4 } = await import("fs/promises");
+      const { resolve: resolve6 } = await import("path");
+      const transcriptData = JSON.parse(await readFile2(transcript_file, "utf-8"));
+      const segments = transcriptData.segments || [];
+      const files = (await readdir4(frames_dir)).filter((f) => f.endsWith(".png") || f.endsWith(".jpg")).sort();
+      const frameFiles = files.map((f) => resolve6(frames_dir, f));
+      const timestamps = files.map((_, i) => i * interval);
+      const result = await assembleResults(frameFiles, timestamps, segments, interval, output_dir);
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(summary, null, 2)
+            text: JSON.stringify({
+              success: true,
+              pairedItems: result.items.length,
+              totalFrames: result.totalFrames,
+              totalSegments: result.totalSegments,
+              outputFile: result.outputFile,
+              preview: result.items.slice(0, 3).map((item) => ({
+                time: item.timeLabel,
+                frame: item.framePath,
+                text: item.text.slice(0, 100)
+              }))
+            }, null, 2)
           }
         ]
       };
     } catch (error) {
       return {
-        content: [{ type: "text", text: `\u5904\u7406\u5931\u8D25: ${error.message}` }],
+        content: [{ type: "text", text: `\u914D\u5BF9\u5931\u8D25: ${error.message}` }],
         isError: true
       };
     } finally {

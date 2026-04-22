@@ -74,16 +74,29 @@ chmod +x install.sh
 /video-learn <URL> --interval 10       # 截帧间隔（秒）
 /video-learn <URL> --smart             # 智能场景检测截帧
 /video-learn <URL> --lang en           # 指定语言
+/video-learn <URL> --proxy http://127.0.0.1:7890  # 代理地址
+```
+
+## 工作流程
+
+使用 `/video-learn` 命令后，Skill 会**分步调用**以下 MCP 工具，每步完成后实时展示进度：
+
+```
+Step 1/4: 下载视频        → 报告视频标题、时长
+Step 2/4: 截取关键帧      → 报告截帧数量
+Step 3/4: 语音转文字      → 报告转录段数、语言、文字预览
+Step 4/4: 图文配对        → 报告配对组数
+分析 + 生成学习笔记       → 输出 notes.md
 ```
 
 ## MCP 工具
 
 | 工具名 | 功能 |
 |--------|------|
-| `video-learn` | 一键完整流程（推荐） |
-| `video-download` | 下载视频 |
-| `video-extract-frames` | 提取关键帧 |
-| `video-transcribe` | 语音转文字 |
+| `video-download` | 下载或获取视频文件 |
+| `video-extract-frames` | 从视频中提取关键帧图片 |
+| `video-transcribe` | 将视频语音转录为带时间戳的文字 |
+| `video-assemble` | 将截帧图片与转录文字按时间戳配对 |
 
 ## 输出结构
 

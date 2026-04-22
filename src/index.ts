@@ -150,93 +150,56 @@ server.tool(
   }
 );
 
-// 工具4：一键完整流程
+// 工具4：图文配对
 server.tool(
-  "video-learn",
-  "一键完整流程：下载视频 → 截帧 → 语音转文字 → 图文配对。支持本地文件、YouTube、B站",
+  "video-assemble",
+  "将截帧图片与转录文字按时间戳配对，生成 paired_results.json",
   {
-    input: z.string().describe("视频路径或 URL"),
-    output_dir: z.string().optional().describe("输出目录（可选）"),
-    model: z.string().optional().describe("Whisper 模型：tiny/base/small/medium/large-v3"),
-    language: z.string().optional().describe("语言：zh/en/auto"),
-    mode: z.enum(["interval", "smart"]).optional().describe("截帧模式"),
-    interval_seconds: z.number().optional().describe("截帧间隔秒数"),
-    proxy: z.string().optional().describe("代理地址"),
+    frames_dir: z.string().describe("截帧图片目录路径"),
+    transcript_file: z.string().describe("转录结果 JSON 文件路径"),
+    output_dir: z.string().describe("输出目录"),
+    interval_seconds: z.number().optional().describe("截帧间隔秒数（用于时间窗口匹配）"),
   },
-  async ({ input, output_dir, model, language, mode, interval_seconds, proxy }) => {
+  async ({ frames_dir, transcript_file, output_dir, interval_seconds }) => {
     pauseIdle();
     try {
       const config = loadConfig();
-      if (model) config.whisper.model = model;
-      if (language) config.whisper.language = language;
-      if (mode) config.extractor.mode = mode;
-      if (interval_seconds) config.extractor.interval_seconds = interval_seconds;
-      if (proxy) config.downloader.proxy = proxy;
+      const interval = interval_seconds || config.extractor.interval_seconds;
 
-      const outDir = output_dir || getOutputDir(config, input);
-      await mkdir(outDir, { recursive: true });
+      const { readFile, readdir } = await import("fs/promises");
+      const { resolve } = await import("path");
 
-      // Step 1: 下载视频
-      const downloadResult = await downloadVideo(input, outDir, config.downloader);
+      const transcriptData = JSON.parse(await readFile(transcript_file, "utf-8"));
+      const segments = transcriptData.segments || [];
 
-      // Step 2: 截帧
-      const extractResult = await extractFrames(
-        downloadResult.videoPath,
-        outDir,
-        config.extractor
-      );
+      const files = (await readdir(frames_dir)).filter(f => f.endsWith(".png") || f.endsWith(".jpg")).sort();
+      const frameFiles = files.map(f => resolve(frames_dir, f));
+      const timestamps = files.map((_, i) => i * interval);
 
-      // Step 3: 语音转文字
-      const transcribeResult = await transcribeVideo(
-        downloadResult.videoPath,
-        outDir,
-        config.whisper
-      );
-
-      // Step 4: 图文配对
-      const assembleResult = await assembleResults(
-        extractResult.frameFiles,
-        extractResult.timestamps,
-        transcribeResult.segments,
-        config.extractor.interval_seconds,
-        outDir
-      );
-
-      // 构建摘要
-      const summary = {
-        success: true,
-        title: downloadResult.title,
-        sourceType: downloadResult.sourceType,
-        outputDir: outDir,
-        stats: {
-          frames: extractResult.frameCount,
-          segments: transcribeResult.segments.length,
-          pairedItems: assembleResult.items.length,
-        },
-        files: {
-          video: downloadResult.videoPath,
-          framesDir: extractResult.framesDir,
-          transcript: transcribeResult.outputFile,
-          pairedResults: assembleResult.outputFile,
-        },
-        preview: assembleResult.items.slice(0, 3).map((item) => ({
-          time: item.timeLabel,
-          frame: item.framePath,
-          text: item.text.slice(0, 100),
-        })),
-      };
+      const result = await assembleResults(frameFiles, timestamps, segments, interval, output_dir);
 
       return {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(summary, null, 2),
+            text: JSON.stringify({
+              success: true,
+              pairedItems: result.items.length,
+              totalFrames: result.totalFrames,
+              totalSegments: result.totalSegments,
+              outputFile: result.outputFile,
+              preview: result.items.slice(0, 3).map((item) => ({
+                time: item.timeLabel,
+                frame: item.framePath,
+                text: item.text.slice(0, 100),
+              })),
+            }, null, 2),
           },
         ],
       };
     } catch (error: any) {
       return {
-        content: [{ type: "text" as const, text: `处理失败: ${error.message}` }],
+        content: [{ type: "text" as const, text: `配对失败: ${error.message}` }],
         isError: true,
       };
     } finally {
