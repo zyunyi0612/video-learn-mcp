@@ -13,6 +13,9 @@ const server = new McpServer({
   version: "1.0.0",
 });
 
+let resetIdle: () => void = () => {};
+let pauseIdle: () => void = () => {};
+
 // 工具1：视频下载
 server.tool(
   "video-download",
@@ -23,6 +26,7 @@ server.tool(
     proxy: z.string().optional().describe("代理地址（可选）"),
   },
   async ({ input, output_dir, proxy }) => {
+    pauseIdle();
     try {
       const config = loadConfig();
       if (proxy) config.downloader.proxy = proxy;
@@ -53,6 +57,8 @@ server.tool(
         content: [{ type: "text" as const, text: `下载失败: ${error.message}` }],
         isError: true,
       };
+    } finally {
+      resetIdle();
     }
   }
 );
@@ -68,6 +74,7 @@ server.tool(
     interval_seconds: z.number().optional().describe("截帧间隔秒数（仅 interval 模式）"),
   },
   async ({ video_path, output_dir, mode, interval_seconds }) => {
+    pauseIdle();
     try {
       const config = loadConfig();
       if (mode) config.extractor.mode = mode;
@@ -93,6 +100,8 @@ server.tool(
         content: [{ type: "text" as const, text: `截帧失败: ${error.message}` }],
         isError: true,
       };
+    } finally {
+      resetIdle();
     }
   }
 );
@@ -108,6 +117,7 @@ server.tool(
     language: z.string().optional().describe("语言代码，如 zh/en/auto"),
   },
   async ({ video_path, output_dir, model, language }) => {
+    pauseIdle();
     try {
       const config = loadConfig();
       if (model) config.whisper.model = model;
@@ -134,6 +144,8 @@ server.tool(
         content: [{ type: "text" as const, text: `转录失败: ${error.message}` }],
         isError: true,
       };
+    } finally {
+      resetIdle();
     }
   }
 );
@@ -152,6 +164,7 @@ server.tool(
     proxy: z.string().optional().describe("代理地址"),
   },
   async ({ input, output_dir, model, language, mode, interval_seconds, proxy }) => {
+    pauseIdle();
     try {
       const config = loadConfig();
       if (model) config.whisper.model = model;
@@ -226,6 +239,8 @@ server.tool(
         content: [{ type: "text" as const, text: `处理失败: ${error.message}` }],
         isError: true,
       };
+    } finally {
+      resetIdle();
     }
   }
 );
@@ -241,9 +256,12 @@ async function main() {
     setTimeout(() => process.exit(0), 1000);
   });
 
-  // 超时保护：空闲 5 分钟后自动退出
+  // 超时保护：空闲 5 分钟后自动退出（工具执行期间暂停）
   let idleTimer: NodeJS.Timeout;
-  const resetIdle = () => {
+  pauseIdle = () => {
+    clearTimeout(idleTimer);
+  };
+  resetIdle = () => {
     clearTimeout(idleTimer);
     idleTimer = setTimeout(() => {
       console.error('[video-learn] idle timeout, exiting...');
