@@ -2979,7 +2979,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve6.call(this, root, ref);
+      let _sch = resolve7.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3006,7 +3006,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve6(root, ref) {
+    function resolve7(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3581,7 +3581,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve6(baseURI, relativeURI, options) {
+    function resolve7(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -3808,7 +3808,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve6,
+      resolve: resolve7,
       resolveComponent,
       equal,
       serialize,
@@ -18888,7 +18888,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve6) => setTimeout(resolve6, pollInterval));
+        await new Promise((resolve7) => setTimeout(resolve7, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -18905,7 +18905,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve6, reject) => {
+    return new Promise((resolve7, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -18983,7 +18983,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve6(parseResult.data);
+            resolve7(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -19244,12 +19244,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve6, reject) => {
+    return new Promise((resolve7, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve6, interval);
+      const timeoutId = setTimeout(resolve7, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -20349,7 +20349,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve6) => setTimeout(resolve6, pollInterval));
+      await new Promise((resolve7) => setTimeout(resolve7, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -20998,12 +20998,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve6) => {
+    return new Promise((resolve7) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve6();
+        resolve7();
       } else {
-        this._stdout.once("drain", resolve6);
+        this._stdout.once("drain", resolve7);
       }
     });
   }
@@ -21122,8 +21122,8 @@ async function handleRemoteVideo(url, outputDir, sourceType, config2) {
       const videoFiles = files.filter((f) => f.endsWith(".mp4") || f.endsWith(".mkv") || f.endsWith(".webm"));
       if (videoFiles.length > 0) {
         const filesWithStat = await Promise.all(videoFiles.map(async (f) => {
-          const stat = await import("fs/promises").then((fs) => fs.stat(resolve2(outputDir, f)));
-          return { name: f, mtime: stat.mtime };
+          const stat2 = await import("fs/promises").then((fs) => fs.stat(resolve2(outputDir, f)));
+          return { name: f, mtime: stat2.mtime };
         }));
         filesWithStat.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
         videoPath = resolve2(outputDir, filesWithStat[0].name);
@@ -21461,13 +21461,68 @@ function formatTime(seconds) {
 }
 
 // src/index.ts
-import { mkdir as mkdir4 } from "fs/promises";
+import { mkdir as mkdir4, writeFile as writeFile3, readFile as readFile2, unlink } from "fs/promises";
+import { existsSync as existsSync2 } from "fs";
+import { resolve as resolve6 } from "path";
+import { createHash } from "crypto";
 import { execFile as execFile4 } from "child_process";
 import { promisify as promisify4 } from "util";
 var execFileAsync4 = promisify4(execFile4);
+var LOCK_TIMEOUT_MS = 30 * 60 * 1e3;
+function makeFingerprint(params) {
+  const sorted = JSON.stringify(params, Object.keys(params).sort());
+  return createHash("md5").update(sorted).digest("hex");
+}
+function lockPath(outputDir, toolName) {
+  return resolve6(outputDir, `.${toolName}.lock`);
+}
+function isPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function acquireLock(outputDir, toolName, fingerprint) {
+  const lp = lockPath(outputDir, toolName);
+  if (existsSync2(lp)) {
+    try {
+      const raw = await readFile2(lp, "utf-8");
+      const lock2 = JSON.parse(raw);
+      const elapsed = Date.now() - lock2.startTime;
+      const stale = elapsed > LOCK_TIMEOUT_MS || !isPidAlive(lock2.pid);
+      if (!stale && lock2.fingerprint === fingerprint) {
+        return { acquired: false, reason: "same_fingerprint_running" };
+      }
+      if (stale) {
+        await unlink(lp).catch(() => {
+        });
+      } else {
+        return { acquired: false, reason: "different_task_running" };
+      }
+    } catch {
+      await unlink(lp).catch(() => {
+      });
+    }
+  }
+  const lock = {
+    fingerprint,
+    pid: process.pid,
+    startTime: Date.now(),
+    toolName
+  };
+  await mkdir4(outputDir, { recursive: true });
+  await writeFile3(lp, JSON.stringify(lock));
+  return { acquired: true };
+}
+async function releaseLock(outputDir, toolName) {
+  await unlink(lockPath(outputDir, toolName)).catch(() => {
+  });
+}
 var server = new McpServer({
   name: "video-learn",
-  version: "1.0.0"
+  version: "1.2.0"
 });
 var resetIdle = () => {
 };
@@ -21603,23 +21658,55 @@ server.tool(
       if (proxy) config2.downloader.proxy = proxy;
       const outDir = output_dir || getOutputDir(config2, input);
       await mkdir4(outDir, { recursive: true });
-      const sourceType = detectSourceType(input);
-      const result = await downloadVideo(input, outDir, config2.downloader);
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              videoPath: result.videoPath,
-              title: result.title,
-              sourceType: result.sourceType,
-              duration: result.duration,
-              outputDir: outDir
-            }, null, 2)
-          }
-        ]
-      };
+      const fp = makeFingerprint({ input, output_dir, proxy });
+      const lock = await acquireLock(outDir, "video-download", fp);
+      if (!lock.acquired) {
+        const { readdir: readdir4 } = await import("fs/promises");
+        const files = await readdir4(outDir).catch(() => []);
+        const videoFile = files.find((f) => /\.(mp4|mkv|webm)$/.test(f));
+        if (videoFile) {
+          const videoPath = resolve6(outDir, videoFile);
+          const title = videoFile.replace(/\.(mp4|mkv|webm)$/, "");
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: true,
+                videoPath,
+                title,
+                sourceType: detectSourceType(input),
+                outputDir: outDir,
+                cached: true
+              }, null, 2)
+            }]
+          };
+        }
+        return {
+          content: [{ type: "text", text: `\u4E0B\u8F7D\u6B63\u5728\u8FDB\u884C\u4E2D\uFF0C\u8BF7\u52FF\u91CD\u590D\u8C03\u7528\uFF08${lock.reason}\uFF09` }]
+        };
+      }
+      try {
+        const result = await downloadVideo(input, outDir, config2.downloader);
+        await releaseLock(outDir, "video-download");
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                success: true,
+                videoPath: result.videoPath,
+                title: result.title,
+                sourceType: result.sourceType,
+                duration: result.duration,
+                outputDir: outDir
+              }, null, 2)
+            }
+          ]
+        };
+      } catch (error2) {
+        await releaseLock(outDir, "video-download");
+        throw error2;
+      }
     } catch (error2) {
       return {
         content: [{ type: "text", text: `\u4E0B\u8F7D\u5931\u8D25: ${error2.message}` }],
@@ -21645,20 +21732,51 @@ server.tool(
       const config2 = loadConfig();
       if (mode) config2.extractor.mode = mode;
       if (interval_seconds) config2.extractor.interval_seconds = interval_seconds;
-      const result = await extractFrames(video_path, output_dir, config2.extractor);
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              framesDir: result.framesDir,
-              frameCount: result.frameCount,
-              timestamps: result.timestamps
-            }, null, 2)
-          }
-        ]
-      };
+      const fp = makeFingerprint({ video_path, output_dir, mode, interval_seconds });
+      const lock = await acquireLock(output_dir, "video-extract-frames", fp);
+      if (!lock.acquired) {
+        const framesDir = resolve6(output_dir, "frames");
+        const { readdir: readdir4 } = await import("fs/promises");
+        const files = await readdir4(framesDir).catch(() => []);
+        const frameFiles = files.filter((f) => f.endsWith(".png") || f.endsWith(".jpg"));
+        if (frameFiles.length > 0) {
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: true,
+                framesDir,
+                frameCount: frameFiles.length,
+                timestamps: frameFiles.map((_, i) => i * (interval_seconds || config2.extractor.interval_seconds)),
+                cached: true
+              }, null, 2)
+            }]
+          };
+        }
+        return {
+          content: [{ type: "text", text: `\u622A\u5E27\u6B63\u5728\u8FDB\u884C\u4E2D\uFF0C\u8BF7\u52FF\u91CD\u590D\u8C03\u7528\uFF08${lock.reason}\uFF09` }]
+        };
+      }
+      try {
+        const result = await extractFrames(video_path, output_dir, config2.extractor);
+        await releaseLock(output_dir, "video-extract-frames");
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                success: true,
+                framesDir: result.framesDir,
+                frameCount: result.frameCount,
+                timestamps: result.timestamps
+              }, null, 2)
+            }
+          ]
+        };
+      } catch (error2) {
+        await releaseLock(output_dir, "video-extract-frames");
+        throw error2;
+      }
     } catch (error2) {
       return {
         content: [{ type: "text", text: `\u622A\u5E27\u5931\u8D25: ${error2.message}` }],
@@ -21684,21 +21802,54 @@ server.tool(
       const config2 = loadConfig();
       if (model) config2.whisper.model = model;
       if (language) config2.whisper.language = language;
-      const result = await transcribeVideo(video_path, output_dir, config2.whisper);
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              segmentCount: result.segments.length,
-              language: result.language,
-              outputFile: result.outputFile,
-              preview: result.fullText.slice(0, 500)
-            }, null, 2)
-          }
-        ]
-      };
+      const fp = makeFingerprint({ video_path, output_dir, model, language });
+      const lock = await acquireLock(output_dir, "video-transcribe", fp);
+      if (!lock.acquired) {
+        const transcriptDir = resolve6(output_dir, "transcript");
+        const transcriptFile = resolve6(transcriptDir, "transcript.json");
+        if (existsSync2(transcriptFile)) {
+          const data = JSON.parse(await readFile2(transcriptFile, "utf-8"));
+          const segments = data.segments || [];
+          const fullText = segments.map((s) => s.text).join("");
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: true,
+                segmentCount: segments.length,
+                language: data.language || "unknown",
+                outputFile: transcriptFile,
+                preview: fullText.slice(0, 500),
+                cached: true
+              }, null, 2)
+            }]
+          };
+        }
+        return {
+          content: [{ type: "text", text: `\u8F6C\u5F55\u6B63\u5728\u8FDB\u884C\u4E2D\uFF0C\u8BF7\u52FF\u91CD\u590D\u8C03\u7528\uFF08${lock.reason}\uFF09` }]
+        };
+      }
+      try {
+        const result = await transcribeVideo(video_path, output_dir, config2.whisper);
+        await releaseLock(output_dir, "video-transcribe");
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                success: true,
+                segmentCount: result.segments.length,
+                language: result.language,
+                outputFile: result.outputFile,
+                preview: result.fullText.slice(0, 500)
+              }, null, 2)
+            }
+          ]
+        };
+      } catch (error2) {
+        await releaseLock(output_dir, "video-transcribe");
+        throw error2;
+      }
     } catch (error2) {
       return {
         content: [{ type: "text", text: `\u8F6C\u5F55\u5931\u8D25: ${error2.message}` }],
@@ -21723,33 +21874,67 @@ server.tool(
     try {
       const config2 = loadConfig();
       const interval = interval_seconds || config2.extractor.interval_seconds;
-      const { readFile: readFile2, readdir: readdir4 } = await import("fs/promises");
-      const { resolve: resolve6 } = await import("path");
-      const transcriptData = JSON.parse(await readFile2(transcript_file, "utf-8"));
-      const segments = transcriptData.segments || [];
-      const files = (await readdir4(frames_dir)).filter((f) => f.endsWith(".png") || f.endsWith(".jpg")).sort();
-      const frameFiles = files.map((f) => resolve6(frames_dir, f));
-      const timestamps = files.map((_, i) => i * interval);
-      const result = await assembleResults(frameFiles, timestamps, segments, interval, output_dir);
-      return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify({
-              success: true,
-              pairedItems: result.items.length,
-              totalFrames: result.totalFrames,
-              totalSegments: result.totalSegments,
-              outputFile: result.outputFile,
-              preview: result.items.slice(0, 3).map((item) => ({
-                time: item.timeLabel,
-                frame: item.framePath,
-                text: item.text.slice(0, 100)
-              }))
-            }, null, 2)
-          }
-        ]
-      };
+      const fp = makeFingerprint({ frames_dir, transcript_file, output_dir, interval_seconds });
+      const lock = await acquireLock(output_dir, "video-assemble", fp);
+      if (!lock.acquired) {
+        const pairedFile = resolve6(output_dir, "paired_results.json");
+        if (existsSync2(pairedFile)) {
+          const data = JSON.parse(await readFile2(pairedFile, "utf-8"));
+          const items = data.items || data || [];
+          return {
+            content: [{
+              type: "text",
+              text: JSON.stringify({
+                success: true,
+                pairedItems: items.length,
+                outputFile: pairedFile,
+                cached: true,
+                preview: (Array.isArray(items) ? items : []).slice(0, 3).map((item) => ({
+                  time: item.timeLabel,
+                  frame: item.framePath,
+                  text: (item.text || "").slice(0, 100)
+                }))
+              }, null, 2)
+            }]
+          };
+        }
+        return {
+          content: [{ type: "text", text: `\u914D\u5BF9\u6B63\u5728\u8FDB\u884C\u4E2D\uFF0C\u8BF7\u52FF\u91CD\u590D\u8C03\u7528\uFF08${lock.reason}\uFF09` }]
+        };
+      }
+      try {
+        const { readFile: rf, readdir: rd } = await import("fs/promises");
+        const { resolve: res } = await import("path");
+        const transcriptData = JSON.parse(await rf(transcript_file, "utf-8"));
+        const segments = transcriptData.segments || [];
+        const files = (await rd(frames_dir)).filter((f) => f.endsWith(".png") || f.endsWith(".jpg")).sort();
+        const frameFiles = files.map((f) => res(frames_dir, f));
+        const timestamps = files.map((_, i) => i * interval);
+        const result = await assembleResults(frameFiles, timestamps, segments, interval, output_dir);
+        await releaseLock(output_dir, "video-assemble");
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                success: true,
+                pairedItems: result.items.length,
+                totalFrames: result.totalFrames,
+                totalSegments: result.totalSegments,
+                outputFile: result.outputFile,
+                preview: result.items.slice(0, 3).map((item) => ({
+                  time: item.timeLabel,
+                  frame: item.framePath,
+                  text: item.text.slice(0, 100)
+                }))
+              }, null, 2)
+            }
+          ]
+        };
+      } catch (error2) {
+        await releaseLock(output_dir, "video-assemble");
+        throw error2;
+      }
     } catch (error2) {
       return {
         content: [{ type: "text", text: `\u914D\u5BF9\u5931\u8D25: ${error2.message}` }],

@@ -6,15 +6,91 @@ import { downloadVideo, detectSourceType } from "./downloader.js";
 import { extractFrames } from "./extractor.js";
 import { transcribeVideo } from "./transcriber.js";
 import { assembleResults } from "./assembler.js";
-import { mkdir } from "fs/promises";
+import { mkdir, writeFile, readFile, unlink, stat } from "fs/promises";
+import { existsSync } from "fs";
+import { resolve } from "path";
+import { createHash } from "crypto";
 import { execFile } from "child_process";
 import { promisify } from "util";
 
 const execFileAsync = promisify(execFile);
 
+// --- Lock file mechanism to prevent duplicate tool calls ---
+
+const LOCK_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+
+interface LockInfo {
+  fingerprint: string;
+  pid: number;
+  startTime: number;
+  toolName: string;
+}
+
+function makeFingerprint(params: Record<string, unknown>): string {
+  const sorted = JSON.stringify(params, Object.keys(params).sort());
+  return createHash("md5").update(sorted).digest("hex");
+}
+
+function lockPath(outputDir: string, toolName: string): string {
+  return resolve(outputDir, `.${toolName}.lock`);
+}
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function acquireLock(
+  outputDir: string,
+  toolName: string,
+  fingerprint: string
+): Promise<{ acquired: boolean; reason?: string; cachedResult?: string }> {
+  const lp = lockPath(outputDir, toolName);
+
+  if (existsSync(lp)) {
+    try {
+      const raw = await readFile(lp, "utf-8");
+      const lock: LockInfo = JSON.parse(raw);
+
+      const elapsed = Date.now() - lock.startTime;
+      const stale = elapsed > LOCK_TIMEOUT_MS || !isPidAlive(lock.pid);
+
+      if (!stale && lock.fingerprint === fingerprint) {
+        return { acquired: false, reason: "same_fingerprint_running" };
+      }
+
+      if (stale) {
+        await unlink(lp).catch(() => {});
+      } else {
+        return { acquired: false, reason: "different_task_running" };
+      }
+    } catch {
+      await unlink(lp).catch(() => {});
+    }
+  }
+
+  const lock: LockInfo = {
+    fingerprint,
+    pid: process.pid,
+    startTime: Date.now(),
+    toolName,
+  };
+  await mkdir(outputDir, { recursive: true });
+  await writeFile(lp, JSON.stringify(lock));
+  return { acquired: true };
+}
+
+async function releaseLock(outputDir: string, toolName: string): Promise<void> {
+  await unlink(lockPath(outputDir, toolName)).catch(() => {});
+}
+
 const server = new McpServer({
   name: "video-learn",
-  version: "1.0.0",
+  version: "1.2.0",
 });
 
 let resetIdle: () => void = () => {};
@@ -171,24 +247,57 @@ server.tool(
       const outDir = output_dir || getOutputDir(config, input);
       await mkdir(outDir, { recursive: true });
 
-      const sourceType = detectSourceType(input);
-      const result = await downloadVideo(input, outDir, config.downloader);
+      const fp = makeFingerprint({ input, output_dir, proxy });
+      const lock = await acquireLock(outDir, "video-download", fp);
+      if (!lock.acquired) {
+        const { readdir } = await import("fs/promises");
+        const files = await readdir(outDir).catch(() => [] as string[]);
+        const videoFile = files.find(f => /\.(mp4|mkv|webm)$/.test(f));
+        if (videoFile) {
+          const videoPath = resolve(outDir, videoFile);
+          const title = videoFile.replace(/\.(mp4|mkv|webm)$/, "");
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                success: true,
+                videoPath,
+                title,
+                sourceType: detectSourceType(input),
+                outputDir: outDir,
+                cached: true,
+              }, null, 2),
+            }],
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: `下载正在进行中，请勿重复调用（${lock.reason}）` }],
+        };
+      }
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify({
-              success: true,
-              videoPath: result.videoPath,
-              title: result.title,
-              sourceType: result.sourceType,
-              duration: result.duration,
-              outputDir: outDir,
-            }, null, 2),
-          },
-        ],
-      };
+      try {
+        const result = await downloadVideo(input, outDir, config.downloader);
+        await releaseLock(outDir, "video-download");
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                success: true,
+                videoPath: result.videoPath,
+                title: result.title,
+                sourceType: result.sourceType,
+                duration: result.duration,
+                outputDir: outDir,
+              }, null, 2),
+            },
+          ],
+        };
+      } catch (error: any) {
+        await releaseLock(outDir, "video-download");
+        throw error;
+      }
     } catch (error: any) {
       return {
         content: [{ type: "text" as const, text: `下载失败: ${error.message}` }],
@@ -217,21 +326,53 @@ server.tool(
       if (mode) config.extractor.mode = mode;
       if (interval_seconds) config.extractor.interval_seconds = interval_seconds;
 
-      const result = await extractFrames(video_path, output_dir, config.extractor);
+      const fp = makeFingerprint({ video_path, output_dir, mode, interval_seconds });
+      const lock = await acquireLock(output_dir, "video-extract-frames", fp);
+      if (!lock.acquired) {
+        const framesDir = resolve(output_dir, "frames");
+        const { readdir } = await import("fs/promises");
+        const files = await readdir(framesDir).catch(() => [] as string[]);
+        const frameFiles = files.filter(f => f.endsWith(".png") || f.endsWith(".jpg"));
+        if (frameFiles.length > 0) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                success: true,
+                framesDir,
+                frameCount: frameFiles.length,
+                timestamps: frameFiles.map((_, i) => i * (interval_seconds || config.extractor.interval_seconds)),
+                cached: true,
+              }, null, 2),
+            }],
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: `截帧正在进行中，请勿重复调用（${lock.reason}）` }],
+        };
+      }
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify({
-              success: true,
-              framesDir: result.framesDir,
-              frameCount: result.frameCount,
-              timestamps: result.timestamps,
-            }, null, 2),
-          },
-        ],
-      };
+      try {
+        const result = await extractFrames(video_path, output_dir, config.extractor);
+        await releaseLock(output_dir, "video-extract-frames");
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                success: true,
+                framesDir: result.framesDir,
+                frameCount: result.frameCount,
+                timestamps: result.timestamps,
+              }, null, 2),
+            },
+          ],
+        };
+      } catch (error: any) {
+        await releaseLock(output_dir, "video-extract-frames");
+        throw error;
+      }
     } catch (error: any) {
       return {
         content: [{ type: "text" as const, text: `截帧失败: ${error.message}` }],
@@ -260,22 +401,56 @@ server.tool(
       if (model) config.whisper.model = model;
       if (language) config.whisper.language = language;
 
-      const result = await transcribeVideo(video_path, output_dir, config.whisper);
+      const fp = makeFingerprint({ video_path, output_dir, model, language });
+      const lock = await acquireLock(output_dir, "video-transcribe", fp);
+      if (!lock.acquired) {
+        const transcriptDir = resolve(output_dir, "transcript");
+        const transcriptFile = resolve(transcriptDir, "transcript.json");
+        if (existsSync(transcriptFile)) {
+          const data = JSON.parse(await readFile(transcriptFile, "utf-8"));
+          const segments = data.segments || [];
+          const fullText = segments.map((s: any) => s.text).join("");
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                success: true,
+                segmentCount: segments.length,
+                language: data.language || "unknown",
+                outputFile: transcriptFile,
+                preview: fullText.slice(0, 500),
+                cached: true,
+              }, null, 2),
+            }],
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: `转录正在进行中，请勿重复调用（${lock.reason}）` }],
+        };
+      }
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify({
-              success: true,
-              segmentCount: result.segments.length,
-              language: result.language,
-              outputFile: result.outputFile,
-              preview: result.fullText.slice(0, 500),
-            }, null, 2),
-          },
-        ],
-      };
+      try {
+        const result = await transcribeVideo(video_path, output_dir, config.whisper);
+        await releaseLock(output_dir, "video-transcribe");
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                success: true,
+                segmentCount: result.segments.length,
+                language: result.language,
+                outputFile: result.outputFile,
+                preview: result.fullText.slice(0, 500),
+              }, null, 2),
+            },
+          ],
+        };
+      } catch (error: any) {
+        await releaseLock(output_dir, "video-transcribe");
+        throw error;
+      }
     } catch (error: any) {
       return {
         content: [{ type: "text" as const, text: `转录失败: ${error.message}` }],
@@ -303,37 +478,72 @@ server.tool(
       const config = loadConfig();
       const interval = interval_seconds || config.extractor.interval_seconds;
 
-      const { readFile, readdir } = await import("fs/promises");
-      const { resolve } = await import("path");
+      const fp = makeFingerprint({ frames_dir, transcript_file, output_dir, interval_seconds });
+      const lock = await acquireLock(output_dir, "video-assemble", fp);
+      if (!lock.acquired) {
+        const pairedFile = resolve(output_dir, "paired_results.json");
+        if (existsSync(pairedFile)) {
+          const data = JSON.parse(await readFile(pairedFile, "utf-8"));
+          const items = data.items || data || [];
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                success: true,
+                pairedItems: items.length,
+                outputFile: pairedFile,
+                cached: true,
+                preview: (Array.isArray(items) ? items : []).slice(0, 3).map((item: any) => ({
+                  time: item.timeLabel,
+                  frame: item.framePath,
+                  text: (item.text || "").slice(0, 100),
+                })),
+              }, null, 2),
+            }],
+          };
+        }
+        return {
+          content: [{ type: "text" as const, text: `配对正在进行中，请勿重复调用（${lock.reason}）` }],
+        };
+      }
 
-      const transcriptData = JSON.parse(await readFile(transcript_file, "utf-8"));
-      const segments = transcriptData.segments || [];
+      try {
+        const { readFile: rf, readdir: rd } = await import("fs/promises");
+        const { resolve: res } = await import("path");
 
-      const files = (await readdir(frames_dir)).filter(f => f.endsWith(".png") || f.endsWith(".jpg")).sort();
-      const frameFiles = files.map(f => resolve(frames_dir, f));
-      const timestamps = files.map((_, i) => i * interval);
+        const transcriptData = JSON.parse(await rf(transcript_file, "utf-8"));
+        const segments = transcriptData.segments || [];
 
-      const result = await assembleResults(frameFiles, timestamps, segments, interval, output_dir);
+        const files = (await rd(frames_dir)).filter(f => f.endsWith(".png") || f.endsWith(".jpg")).sort();
+        const frameFiles = files.map(f => res(frames_dir, f));
+        const timestamps = files.map((_, i) => i * interval);
 
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: JSON.stringify({
-              success: true,
-              pairedItems: result.items.length,
-              totalFrames: result.totalFrames,
-              totalSegments: result.totalSegments,
-              outputFile: result.outputFile,
-              preview: result.items.slice(0, 3).map((item) => ({
-                time: item.timeLabel,
-                frame: item.framePath,
-                text: item.text.slice(0, 100),
-              })),
-            }, null, 2),
-          },
-        ],
-      };
+        const result = await assembleResults(frameFiles, timestamps, segments, interval, output_dir);
+        await releaseLock(output_dir, "video-assemble");
+
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: JSON.stringify({
+                success: true,
+                pairedItems: result.items.length,
+                totalFrames: result.totalFrames,
+                totalSegments: result.totalSegments,
+                outputFile: result.outputFile,
+                preview: result.items.slice(0, 3).map((item) => ({
+                  time: item.timeLabel,
+                  frame: item.framePath,
+                  text: item.text.slice(0, 100),
+                })),
+              }, null, 2),
+            },
+          ],
+        };
+      } catch (error: any) {
+        await releaseLock(output_dir, "video-assemble");
+        throw error;
+      }
     } catch (error: any) {
       return {
         content: [{ type: "text" as const, text: `配对失败: ${error.message}` }],
