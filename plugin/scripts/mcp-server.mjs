@@ -21473,10 +21473,11 @@ var resetIdle = () => {
 };
 var pauseIdle = () => {
 };
-async function checkCommand(cmd) {
+async function checkCommand(cmd, versionFlag = "--version") {
   try {
-    const { stdout } = await execFileAsync4(cmd, ["--version"], { timeout: 5e3 });
-    return stdout.trim().split("\n")[0];
+    const { stdout, stderr } = await execFileAsync4(cmd, [versionFlag], { timeout: 5e3 });
+    const output = (stdout || stderr).trim().split("\n")[0];
+    return output || "installed";
   } catch {
     return null;
   }
@@ -21518,7 +21519,7 @@ server.tool(
   async () => {
     const deps = [];
     const missing = [];
-    const ffmpegVer = await checkCommand("ffmpeg");
+    const ffmpegVer = await checkCommand("ffmpeg", "-version");
     if (ffmpegVer) {
       const match = ffmpegVer.match(/version\s+([\S]+)/);
       deps.push({ name: "ffmpeg", status: "ok", version: match?.[1] || "unknown" });
@@ -21526,7 +21527,19 @@ server.tool(
       deps.push({ name: "ffmpeg", status: "missing", detail: "brew install ffmpeg" });
       missing.push("ffmpeg");
     }
-    const ytdlpVer = await checkCommand("yt-dlp");
+    let ytdlpVer = await checkCommand("yt-dlp");
+    if (!ytdlpVer) {
+      const homedir3 = process.env.HOME || "";
+      const extraPaths = [
+        `${homedir3}/.local/bin/yt-dlp`,
+        `${homedir3}/Library/Python/3.11/bin/yt-dlp`,
+        `${homedir3}/Library/Python/3.12/bin/yt-dlp`
+      ];
+      for (const p of extraPaths) {
+        ytdlpVer = await checkCommand(p);
+        if (ytdlpVer) break;
+      }
+    }
     if (ytdlpVer) {
       deps.push({ name: "yt-dlp", status: "ok", version: ytdlpVer });
     } else {

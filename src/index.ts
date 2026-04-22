@@ -20,10 +20,11 @@ const server = new McpServer({
 let resetIdle: () => void = () => {};
 let pauseIdle: () => void = () => {};
 
-async function checkCommand(cmd: string): Promise<string | null> {
+async function checkCommand(cmd: string, versionFlag = "--version"): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync(cmd, ["--version"], { timeout: 5000 });
-    return stdout.trim().split("\n")[0];
+    const { stdout, stderr } = await execFileAsync(cmd, [versionFlag], { timeout: 5000 });
+    const output = (stdout || stderr).trim().split("\n")[0];
+    return output || "installed";
   } catch {
     return null;
   }
@@ -69,8 +70,8 @@ server.tool(
     const deps: { name: string; status: "ok" | "missing" | "warn"; version?: string; detail?: string }[] = [];
     const missing: string[] = [];
 
-    // ffmpeg
-    const ffmpegVer = await checkCommand("ffmpeg");
+    // ffmpeg (uses -version, not --version)
+    const ffmpegVer = await checkCommand("ffmpeg", "-version");
     if (ffmpegVer) {
       const match = ffmpegVer.match(/version\s+([\S]+)/);
       deps.push({ name: "ffmpeg", status: "ok", version: match?.[1] || "unknown" });
@@ -79,8 +80,20 @@ server.tool(
       missing.push("ffmpeg");
     }
 
-    // yt-dlp
-    const ytdlpVer = await checkCommand("yt-dlp");
+    // yt-dlp (may be in ~/.local/bin or Python user bin)
+    let ytdlpVer = await checkCommand("yt-dlp");
+    if (!ytdlpVer) {
+      const homedir = process.env.HOME || "";
+      const extraPaths = [
+        `${homedir}/.local/bin/yt-dlp`,
+        `${homedir}/Library/Python/3.11/bin/yt-dlp`,
+        `${homedir}/Library/Python/3.12/bin/yt-dlp`,
+      ];
+      for (const p of extraPaths) {
+        ytdlpVer = await checkCommand(p);
+        if (ytdlpVer) break;
+      }
+    }
     if (ytdlpVer) {
       deps.push({ name: "yt-dlp", status: "ok", version: ytdlpVer });
     } else {
