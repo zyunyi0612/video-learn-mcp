@@ -21199,6 +21199,24 @@ import { mkdir as mkdir3, readFile, writeFile } from "fs/promises";
 import { fileURLToPath as fileURLToPath2 } from "url";
 var execFileAsync3 = promisify3(execFile3);
 var __dirname2 = dirname2(fileURLToPath2(import.meta.url));
+async function findPython3() {
+  const candidates = [
+    "/opt/homebrew/bin/python3.11",
+    "/opt/homebrew/bin/python3",
+    "/usr/local/bin/python3.11",
+    "/usr/local/bin/python3",
+    "python3.11",
+    "python3"
+  ];
+  for (const cmd of candidates) {
+    try {
+      const { stdout } = await execFileAsync3(cmd, ["-c", "import sys; print(sys.version_info.minor)"]);
+      if (parseInt(stdout.trim(), 10) >= 10) return cmd;
+    } catch {
+    }
+  }
+  return "python3";
+}
 async function readYoutubeSubs(videoPath) {
   const dir = dirname2(videoPath);
   const base = basename2(videoPath, ".mp4");
@@ -21301,7 +21319,7 @@ async function transcribeVideo(videoPath, outputDir, config2) {
   const transcriptDir = resolve4(outputDir, "transcript");
   await mkdir3(transcriptDir, { recursive: true });
   const outputFile = resolve4(transcriptDir, "transcript.json");
-  const scriptPath = resolve4(__dirname2, "scripts", "transcribe.py");
+  const scriptPath = resolve4(__dirname2, "transcribe.py");
   const youtubeSubs = await readYoutubeSubs(videoPath);
   let segments;
   let language = config2.language;
@@ -21310,8 +21328,9 @@ async function transcribeVideo(videoPath, outputDir, config2) {
     segments = youtubeSubs;
     hasYoutubeSubs = true;
     try {
+      const pythonCmd = await findPython3();
       const { stdout } = await execFileAsync3(
-        "python3",
+        pythonCmd,
         [
           scriptPath,
           "--input",
@@ -21344,8 +21363,9 @@ async function transcribeVideo(videoPath, outputDir, config2) {
     }
   } else {
     hasYoutubeSubs = false;
+    const pythonCmd = await findPython3();
     const { stdout } = await execFileAsync3(
-      "python3",
+      pythonCmd,
       [
         scriptPath,
         "--input",

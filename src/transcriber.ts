@@ -8,6 +8,24 @@ import { WhisperConfig } from "./config.js";
 const execFileAsync = promisify(execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+async function findPython3(): Promise<string> {
+  const candidates = [
+    "/opt/homebrew/bin/python3.11",
+    "/opt/homebrew/bin/python3",
+    "/usr/local/bin/python3.11",
+    "/usr/local/bin/python3",
+    "python3.11",
+    "python3",
+  ];
+  for (const cmd of candidates) {
+    try {
+      const { stdout } = await execFileAsync(cmd, ["-c", "import sys; print(sys.version_info.minor)"]);
+      if (parseInt(stdout.trim(), 10) >= 10) return cmd;
+    } catch {}
+  }
+  return "python3";
+}
+
 export interface TranscribeSegment {
   start: number;
   end: number;
@@ -162,7 +180,7 @@ export async function transcribeVideo(
   await mkdir(transcriptDir, { recursive: true });
 
   const outputFile = resolve(transcriptDir, "transcript.json");
-  const scriptPath = resolve(__dirname, "scripts", "transcribe.py");
+  const scriptPath = resolve(__dirname, "transcribe.py");
 
   // 先尝试读取 YouTube 字幕
   const youtubeSubs = await readYoutubeSubs(videoPath);
@@ -178,8 +196,9 @@ export async function transcribeVideo(
 
     // 运行 Whisper 转录用于对比
     try {
+      const pythonCmd = await findPython3();
       const { stdout } = await execFileAsync(
-        "python3",
+        pythonCmd,
         [
           scriptPath,
           "--input", videoPath,
@@ -214,8 +233,9 @@ export async function transcribeVideo(
     // 没有 YouTube 字幕，用 Whisper
     hasYoutubeSubs = false;
 
+    const pythonCmd = await findPython3();
     const { stdout } = await execFileAsync(
-      "python3",
+      pythonCmd,
       [
         scriptPath,
         "--input", videoPath,
