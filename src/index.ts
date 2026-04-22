@@ -24,6 +24,7 @@ interface LockInfo {
   pid: number;
   startTime: number;
   toolName: string;
+  status: "running" | "done";
 }
 
 function makeFingerprint(params: Record<string, unknown>): string {
@@ -48,7 +49,7 @@ async function acquireLock(
   outputDir: string,
   toolName: string,
   fingerprint: string
-): Promise<{ acquired: boolean; reason?: string; cachedResult?: string }> {
+): Promise<{ acquired: boolean; reason?: string }> {
   const lp = lockPath(outputDir, toolName);
 
   if (existsSync(lp)) {
@@ -56,21 +57,23 @@ async function acquireLock(
       const raw = await readFile(lp, "utf-8");
       const lock: LockInfo = JSON.parse(raw);
 
-      const elapsed = Date.now() - lock.startTime;
-      const stale = elapsed > LOCK_TIMEOUT_MS || !isPidAlive(lock.pid);
-
-      if (!stale && lock.fingerprint === fingerprint) {
-        return { acquired: false, reason: "same_fingerprint_running" };
+      if (lock.status === "done" && lock.fingerprint === fingerprint) {
+        return { acquired: false, reason: "already_done" };
       }
 
-      if (stale) {
-        await unlink(lp).catch(() => {});
-      } else {
-        return { acquired: false, reason: "different_task_running" };
+      if (lock.status === "running") {
+        const elapsed = Date.now() - lock.startTime;
+        const stale = elapsed > LOCK_TIMEOUT_MS || !isPidAlive(lock.pid);
+
+        if (!stale && lock.fingerprint === fingerprint) {
+          return { acquired: false, reason: "same_fingerprint_running" };
+        }
+
+        if (!stale) {
+          return { acquired: false, reason: "different_task_running" };
+        }
       }
-    } catch {
-      await unlink(lp).catch(() => {});
-    }
+    } catch {}
   }
 
   const lock: LockInfo = {
@@ -78,19 +81,30 @@ async function acquireLock(
     pid: process.pid,
     startTime: Date.now(),
     toolName,
+    status: "running",
   };
   await mkdir(outputDir, { recursive: true });
   await writeFile(lp, JSON.stringify(lock));
   return { acquired: true };
 }
 
-async function releaseLock(outputDir: string, toolName: string): Promise<void> {
+async function completeLock(outputDir: string, toolName: string): Promise<void> {
+  const lp = lockPath(outputDir, toolName);
+  try {
+    const raw = await readFile(lp, "utf-8");
+    const lock: LockInfo = JSON.parse(raw);
+    lock.status = "done";
+    await writeFile(lp, JSON.stringify(lock));
+  } catch {}
+}
+
+async function removeLock(outputDir: string, toolName: string): Promise<void> {
   await unlink(lockPath(outputDir, toolName)).catch(() => {});
 }
 
 const server = new McpServer({
   name: "video-learn",
-  version: "1.2.0",
+  version: "1.2.1",
 });
 
 let resetIdle: () => void = () => {};
@@ -277,7 +291,7 @@ server.tool(
 
       try {
         const result = await downloadVideo(input, outDir, config.downloader);
-        await releaseLock(outDir, "video-download");
+        await completeLock(outDir, "video-download");
 
         return {
           content: [
@@ -295,7 +309,7 @@ server.tool(
           ],
         };
       } catch (error: any) {
-        await releaseLock(outDir, "video-download");
+        await removeLock(outDir, "video-download");
         throw error;
       }
     } catch (error: any) {
@@ -354,7 +368,7 @@ server.tool(
 
       try {
         const result = await extractFrames(video_path, output_dir, config.extractor);
-        await releaseLock(output_dir, "video-extract-frames");
+        await completeLock(output_dir, "video-extract-frames");
 
         return {
           content: [
@@ -370,7 +384,7 @@ server.tool(
           ],
         };
       } catch (error: any) {
-        await releaseLock(output_dir, "video-extract-frames");
+        await removeLock(output_dir, "video-extract-frames");
         throw error;
       }
     } catch (error: any) {
@@ -431,7 +445,7 @@ server.tool(
 
       try {
         const result = await transcribeVideo(video_path, output_dir, config.whisper);
-        await releaseLock(output_dir, "video-transcribe");
+        await completeLock(output_dir, "video-transcribe");
 
         return {
           content: [
@@ -448,7 +462,7 @@ server.tool(
           ],
         };
       } catch (error: any) {
-        await releaseLock(output_dir, "video-transcribe");
+        await removeLock(output_dir, "video-transcribe");
         throw error;
       }
     } catch (error: any) {
@@ -519,7 +533,7 @@ server.tool(
         const timestamps = files.map((_, i) => i * interval);
 
         const result = await assembleResults(frameFiles, timestamps, segments, interval, output_dir);
-        await releaseLock(output_dir, "video-assemble");
+        await completeLock(output_dir, "video-assemble");
 
         return {
           content: [
@@ -541,7 +555,7 @@ server.tool(
           ],
         };
       } catch (error: any) {
-        await releaseLock(output_dir, "video-assemble");
+        await removeLock(output_dir, "video-assemble");
         throw error;
       }
     } catch (error: any) {

@@ -1,6 +1,6 @@
 {
   "name": "video-learn",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Learn from videos - download, extract frames, transcribe speech, pair text with images, generate study notes",
   "author": {
     "name": "zhangyunyi"

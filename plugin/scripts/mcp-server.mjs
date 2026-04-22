@@ -21490,39 +21490,50 @@ async function acquireLock(outputDir, toolName, fingerprint) {
     try {
       const raw = await readFile2(lp, "utf-8");
       const lock2 = JSON.parse(raw);
-      const elapsed = Date.now() - lock2.startTime;
-      const stale = elapsed > LOCK_TIMEOUT_MS || !isPidAlive(lock2.pid);
-      if (!stale && lock2.fingerprint === fingerprint) {
-        return { acquired: false, reason: "same_fingerprint_running" };
+      if (lock2.status === "done" && lock2.fingerprint === fingerprint) {
+        return { acquired: false, reason: "already_done" };
       }
-      if (stale) {
-        await unlink(lp).catch(() => {
-        });
-      } else {
-        return { acquired: false, reason: "different_task_running" };
+      if (lock2.status === "running") {
+        const elapsed = Date.now() - lock2.startTime;
+        const stale = elapsed > LOCK_TIMEOUT_MS || !isPidAlive(lock2.pid);
+        if (!stale && lock2.fingerprint === fingerprint) {
+          return { acquired: false, reason: "same_fingerprint_running" };
+        }
+        if (!stale) {
+          return { acquired: false, reason: "different_task_running" };
+        }
       }
     } catch {
-      await unlink(lp).catch(() => {
-      });
     }
   }
   const lock = {
     fingerprint,
     pid: process.pid,
     startTime: Date.now(),
-    toolName
+    toolName,
+    status: "running"
   };
   await mkdir4(outputDir, { recursive: true });
   await writeFile3(lp, JSON.stringify(lock));
   return { acquired: true };
 }
-async function releaseLock(outputDir, toolName) {
+async function completeLock(outputDir, toolName) {
+  const lp = lockPath(outputDir, toolName);
+  try {
+    const raw = await readFile2(lp, "utf-8");
+    const lock = JSON.parse(raw);
+    lock.status = "done";
+    await writeFile3(lp, JSON.stringify(lock));
+  } catch {
+  }
+}
+async function removeLock(outputDir, toolName) {
   await unlink(lockPath(outputDir, toolName)).catch(() => {
   });
 }
 var server = new McpServer({
   name: "video-learn",
-  version: "1.2.0"
+  version: "1.2.1"
 });
 var resetIdle = () => {
 };
@@ -21687,7 +21698,7 @@ server.tool(
       }
       try {
         const result = await downloadVideo(input, outDir, config2.downloader);
-        await releaseLock(outDir, "video-download");
+        await completeLock(outDir, "video-download");
         return {
           content: [
             {
@@ -21704,7 +21715,7 @@ server.tool(
           ]
         };
       } catch (error2) {
-        await releaseLock(outDir, "video-download");
+        await removeLock(outDir, "video-download");
         throw error2;
       }
     } catch (error2) {
@@ -21759,7 +21770,7 @@ server.tool(
       }
       try {
         const result = await extractFrames(video_path, output_dir, config2.extractor);
-        await releaseLock(output_dir, "video-extract-frames");
+        await completeLock(output_dir, "video-extract-frames");
         return {
           content: [
             {
@@ -21774,7 +21785,7 @@ server.tool(
           ]
         };
       } catch (error2) {
-        await releaseLock(output_dir, "video-extract-frames");
+        await removeLock(output_dir, "video-extract-frames");
         throw error2;
       }
     } catch (error2) {
@@ -21831,7 +21842,7 @@ server.tool(
       }
       try {
         const result = await transcribeVideo(video_path, output_dir, config2.whisper);
-        await releaseLock(output_dir, "video-transcribe");
+        await completeLock(output_dir, "video-transcribe");
         return {
           content: [
             {
@@ -21847,7 +21858,7 @@ server.tool(
           ]
         };
       } catch (error2) {
-        await releaseLock(output_dir, "video-transcribe");
+        await removeLock(output_dir, "video-transcribe");
         throw error2;
       }
     } catch (error2) {
@@ -21911,7 +21922,7 @@ server.tool(
         const frameFiles = files.map((f) => res(frames_dir, f));
         const timestamps = files.map((_, i) => i * interval);
         const result = await assembleResults(frameFiles, timestamps, segments, interval, output_dir);
-        await releaseLock(output_dir, "video-assemble");
+        await completeLock(output_dir, "video-assemble");
         return {
           content: [
             {
@@ -21932,7 +21943,7 @@ server.tool(
           ]
         };
       } catch (error2) {
-        await releaseLock(output_dir, "video-assemble");
+        await removeLock(output_dir, "video-assemble");
         throw error2;
       }
     } catch (error2) {
