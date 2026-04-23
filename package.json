@@ -9,10 +9,16 @@
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts"
   },
-  "keywords": ["mcp", "video", "learning", "whisper", "ffmpeg"],
+  "keywords": [
+    "mcp",
+    "video",
+    "learning",
+    "whisper",
+    "ffmpeg"
+  ],
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.12.1",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "zod": "^3.24.4"
   },
   "devDependencies": {
