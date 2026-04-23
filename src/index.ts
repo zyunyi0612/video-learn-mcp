@@ -580,19 +580,40 @@ async function main() {
     setTimeout(() => process.exit(0), 1000);
   });
 
-  // 超时保护：空闲 5 分钟后自动退出（工具执行期间暂停）
+  // 超时保护：空闲 5 分钟后自动退出，工具执行时 30 分钟超时
   let idleTimer: NodeJS.Timeout;
-  pauseIdle = () => {
+  let currentTimerTimeout: number = 5 * 60 * 1000; // 默认 5 分钟
+
+  const setIdleTimer = (timeout: number) => {
     clearTimeout(idleTimer);
+    currentTimerTimeout = timeout;
+    idleTimer = setTimeout(() => {
+      console.error(`[video-learn] idle timeout (${timeout / 60000}min), exiting...`);
+      process.exit(0);
+    }, timeout);
+  };
+
+  pauseIdle = () => {
+    // 工具执行时延长超时到 30 分钟，而不是完全暂停
+    if (currentTimerTimeout !== 30 * 60 * 1000) {
+      setIdleTimer(30 * 60 * 1000);
+    }
   };
   resetIdle = () => {
-    clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => {
-      console.error('[video-learn] idle timeout, exiting...');
-      process.exit(0);
-    }, 5 * 60 * 1000);
+    setIdleTimer(5 * 60 * 1000);
   };
   resetIdle();
+
+  // 信号处理：优雅退出（处理 ESC 打断等情况）
+  const gracefulShutdown = (signal: string) => {
+    console.error(`[video-learn] received ${signal}, cleaning up...`);
+    // 清理所有 lock 文件
+    // 注意：这里不主动清理，因为工具可能还在执行，让 lock 机制处理
+    setTimeout(() => process.exit(0), 2000);
+  };
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
   process.on('message', resetIdle);
   process.stdin.on('data', resetIdle);
 }
