@@ -594,10 +594,9 @@ async function main() {
   };
 
   pauseIdle = () => {
-    // 工具执行时延长超时到 30 分钟，而不是完全暂停
-    if (currentTimerTimeout !== 30 * 60 * 1000) {
-      setIdleTimer(30 * 60 * 1000);
-    }
+    // 工具执行时完全清除 timer，不计时
+    // 等工具返回后由 resetIdle() 重新开始 5 分钟计时
+    clearTimeout(idleTimer);
   };
   resetIdle = () => {
     setIdleTimer(5 * 60 * 1000);
