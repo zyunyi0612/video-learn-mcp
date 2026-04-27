@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc && cp -r src/scripts dist/",
+    "build": "tsc && cp -r src/scripts dist/ && cp dist/config.js dist/downloader.js dist/extractor.js dist/transcriber.js dist/assembler.js plugin/scripts/",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts"
   },
