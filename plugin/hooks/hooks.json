@@ -7,6 +7,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "export PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\"; node \"${CLAUDE_PLUGIN_ROOT}/scripts/install-deps.js\"",
+            "timeout": 60
+          },
+          {
+            "type": "command",
             "command": "export PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\"; node \"${CLAUDE_PLUGIN_ROOT}/scripts/check-deps.mjs\"",
             "timeout": 30
           }
